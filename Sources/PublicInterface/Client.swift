@@ -216,10 +216,12 @@ public class Client: WalletConnect {
     override func onTextReceive(_ text: String, from url: WCURL) {
         if let response = try? communicator.response(from: text, url: url) {
             log(response)
-            if let completion = responses.find(requestID: response.internalID) {
-                completion(response)
-                responses.remove(requestID: response.internalID)
-            }
+            // Rainbow (at least) application send connect response with random id
+            // because of that correlated request can't be found by id. Here is crutch
+            let isConnectResponse = (try? response.result(as: Session.WalletInfo.self)) != nil
+            let (realRequestID, completion) = responses.find(requestID: response.internalID, isConnectResponse: isConnectResponse)
+            completion?(response)
+            responses.remove(requestID: realRequestID)
         } else if let request = try? communicator.request(from: text, url: url) {
             log(request)
             expectUpdateSessionRequest(request)
@@ -287,13 +289,20 @@ public class Client: WalletConnect {
             }
         }
 
-        func find(requestID: JSONRPC_2_0.IDType) -> RequestResponse? {
+        func find(requestID: JSONRPC_2_0.IDType, isConnectResponse: Bool) -> (requestID: JSONRPC_2_0.IDType, RequestResponse?) {
+            var realRequestID  = requestID
             var result: RequestResponse?
             dispatchPrecondition(condition: .notOnQueue(queue))
             queue.sync { [unowned self] in
-                result = self.responses[requestID]
+                if let response = self.responses[requestID] {
+                    result = response
+                }
+                if isConnectResponse, responses.count == 1, let response = responses.first {
+                    result = response.value
+                    realRequestID = response.key
+                }
             }
-            return result
+            return (realRequestID, result)
         }
 
         func remove(requestID: JSONRPC_2_0.IDType) {
