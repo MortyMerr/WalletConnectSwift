@@ -219,9 +219,13 @@ public class Client: WalletConnect {
             // Rainbow (at least) application send connect response with random id
             // because of that correlated request can't be found by id. Here is crutch
             let isConnectResponse = (try? response.result(as: Session.WalletInfo.self)) != nil
-            let (realRequestID, completion) = responses.find(requestID: response.internalID, isConnectResponse: isConnectResponse)
+            let completion = responses.find(requestID: response.internalID, isConnectResponse: isConnectResponse)
             completion?(response)
-            responses.remove(requestID: realRequestID)
+            if isConnectResponse {
+                responses.removeAll()
+            } else {
+                responses.remove(requestID: response.internalID)
+            }
         } else if let request = try? communicator.request(from: text, url: url) {
             log(request)
             expectUpdateSessionRequest(request)
@@ -289,8 +293,7 @@ public class Client: WalletConnect {
             }
         }
 
-        func find(requestID: JSONRPC_2_0.IDType, isConnectResponse: Bool) -> (requestID: JSONRPC_2_0.IDType, RequestResponse?) {
-            var realRequestID  = requestID
+        func find(requestID: JSONRPC_2_0.IDType, isConnectResponse: Bool) -> RequestResponse? {
             var result: RequestResponse?
             dispatchPrecondition(condition: .notOnQueue(queue))
             queue.sync { [unowned self] in
@@ -299,10 +302,9 @@ public class Client: WalletConnect {
                 }
                 if isConnectResponse, responses.count == 1, let response = responses.first {
                     result = response.value
-                    realRequestID = response.key
                 }
             }
-            return (realRequestID, result)
+            return result
         }
 
         func remove(requestID: JSONRPC_2_0.IDType) {
@@ -312,6 +314,12 @@ public class Client: WalletConnect {
             }
         }
 
+        func removeAll() {
+            dispatchPrecondition(condition: .notOnQueue(queue))
+            queue.sync { [unowned self] in
+                self.responses.removeAll()
+            }
+        }
     }
 
     /// https://docs.walletconnect.org/json-rpc/ethereum#parameters-3
